@@ -1,0 +1,7 @@
+gofs
+gofs-back
+helpers/
+.DS_Store
+*.log
+*.test
+*.out
