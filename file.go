@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"syscall"
+	"time"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
@@ -17,6 +18,7 @@ func (f *FileNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint3
 
 // after open getattr should be called, else it considers filesie as 0
 // Getattr returns file attributes (size, permissions, etc.)
+// timestamps in progress
 func (f *FileNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
 	log.Println("📊 GETATTR called!")
 
@@ -28,6 +30,8 @@ func (f *FileNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.Attr
 
 	out.Uid = uint32(syscall.Getuid())
 	out.Gid = uint32(syscall.Getgid())
+
+	out.SetTimes(&f.data.mtime, &f.data.mtime, &f.data.ctime)
 
 	log.Printf("   File size: %d bytes", out.Size)
 	return 0
@@ -79,11 +83,15 @@ FileNode Jobs:"Where should these bytes go?"
 GetAttr must be updated , ls -l must see new file size
 **/
 
+// Timestamps in progress
+
 func (f *FileNode) Write(ctx context.Context, fh fs.FileHandle, data []byte, off int64) (uint32, syscall.Errno) {
 
 	if off < 0 {
 		return 0, syscall.EINVAL
 	}
+
+	now := time.Now()
 
 	current := []byte(f.data.content)
 	end := int(off) + len(data)
@@ -97,9 +105,17 @@ func (f *FileNode) Write(ctx context.Context, fh fs.FileHandle, data []byte, off
 	copy(current[int(off):end], data)
 	f.data.content = string(current)
 
+	f.data.mtime = now
+	f.data.ctime = now
+
 	return uint32(len(data)), 0
 
 }
+
+/**
+used to track metadata for files
+When we change anyhting like trunctae file, then its metadata will be changed
+**/
 
 func (f *FileNode) Setattr(
 	ctx context.Context,
@@ -123,6 +139,10 @@ func (f *FileNode) Setattr(
 	}
 
 	f.data.content = string(current)
+
+	now := time.Now()
+	f.data.mtime = now
+	f.data.ctime = now
 
 	// Return the updated size and other attributes
 	return f.Getattr(ctx, fh, out)

@@ -58,8 +58,21 @@ For a while, creating a file (`touch`/`echo >`) kept failing with "permission de
 
 `Unlink` and `Rmdir` just remove an entry from the map and return success — go-fuse takes care of removing the node from the kernel's tree after that. `Rmdir` also checks the folder is empty first and returns `ENOTEMPTY` if not, same as real `rmdir`. I'm not implementing recursive delete myself — `rm -rf` is the shell doing many individual `Unlink`/`Rmdir` calls, not something the filesystem needs to handle.
 
+## How `Rename` works
+
+`Rename` has to touch two `RootNode`s at once (source parent and destination parent), which can deadlock if both goroutines lock them in opposite order. I avoid that by always locking in a fixed order — comparing the two nodes' pointer addresses (`unsafe.Pointer`) and locking the lower one first — instead of just locking "source then destination". The moved file/folder itself only gets its `ctime` bumped (its own content didn't change, just its name/location); both parent directories get `mtime` *and* `ctime` bumped, since their listing (their "content") changed.
+
+## How timestamps work
+
+- `mtime` = "content changed" — bumped when a file's bytes change (`Write`, `Setattr` truncate/extend) or a directory's listing changes (`Create`, `Mkdir`, `Unlink`, `Rmdir`).
+- `ctime` = "something about this inode changed" — bumped whenever `mtime` is bumped, plus on pure metadata/location changes that don't touch content (e.g. the moved item in a `Rename`).
+- `atime` isn't actively tracked on reads (kept equal to `mtime`/`ctime` at creation time only) — updating it on every `Read` isn't implemented, mirroring real filesystems' `noatime`/`relatime` mount options.
+- Known gaps: `Setattr` requests that only carry time fields (e.g. `touch` on an already-existing file) aren't handled yet — they hit `ENOTSUP`. Birthtime is also still zero.
+
 ## What's not done yet
 
 - No disk persistence — everything disappears when the process stops.
-- No `Rename`, no symlinks, no real timestamps (they're all zero right now).
+- No symlinks.
+- `touch` on an already-existing file (`Setattr` time-only requests) isn't supported yet.
+- Birthtime isn't implemented (macOS-specific field, currently zero).
 - File content is one big string per file in memory, so this wouldn't hold up for large files.

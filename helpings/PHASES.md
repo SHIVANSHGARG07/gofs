@@ -17,10 +17,12 @@ Goal: get a working in-memory filesystem where files and directories can be crea
 - [x] Delete files (`Unlink`)
 - [x] Delete empty directories (`Rmdir`), refusing non-empty ones with `ENOTEMPTY`
 
-## Phase 2 — Planned
+## Phase 2 — Rename & Timestamps (done)
 
-- [ ] `Rename` — move/rename files and directories
-- [ ] Real timestamps (currently zero-valued)
+- [x] `Rename` — move/rename files and directories (same-dir and cross-dir)
+- [x] Real timestamps (mtime/ctime) across `Create`, `Mkdir`, `Write`, `Setattr` (size), `Unlink`, `Rmdir`, `Rename`
+- [ ] Known limitation: `Setattr` time-only requests (e.g. `touch` on an already-existing file) aren't supported yet
+- [ ] Known limitation: birthtime not implemented (macOS-specific field, currently zero)
 
 ## Phase 3 — Planned
 

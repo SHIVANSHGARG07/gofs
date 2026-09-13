@@ -4,10 +4,17 @@ import (
 	"context"
 	"log"
 	"syscall"
+	"time"
+	"unsafe"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
+
+// RENAME_NOREPLACE mirrors the Linux renameat2() flag value (0x1).
+// golang.org/x/sys/unix only defines this constant on Linux, but the
+// FUSE protocol sends the same numeric flag value on all platforms.
+const RENAME_NOREPLACE = 0x1
 
 /**
 1) Creates an empty slice in memory taht will hold directories entry
@@ -92,6 +99,7 @@ out:
 6) Register as a real node
 7) Fill the form for out
 8) return things
+9) # timestamaps in progress
 
 **/
 
@@ -100,9 +108,13 @@ func (r *RootNode) Create(ctx context.Context, name string, flag uint32, mode ui
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	newData := &FileData{content: ""}
+	now := time.Now()
+
+	newData := &FileData{content: "", mtime: now, ctime: now}
 
 	r.files[name] = newData
+	r.mtime = now
+	r.ctime = now
 
 	stable := fs.StableAttr{
 		Mode: fuse.S_IFREG,
@@ -112,9 +124,12 @@ func (r *RootNode) Create(ctx context.Context, name string, flag uint32, mode ui
 
 	node := r.NewPersistentInode(ctx, fileNode, stable)
 
+	// Sent back to kernel
 	out.Attr.Mode = fuse.S_IFREG | 0644
 	out.Attr.Uid = uint32(syscall.Getuid())
 	out.Attr.Gid = uint32(syscall.Getgid())
+
+	out.Attr.SetTimes(&now, &now, &now)
 
 	return node, nil, 0, 0
 }
@@ -123,6 +138,8 @@ func (r *RootNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrO
 	out.Mode = fuse.S_IFDIR | 0755
 	out.Uid = uint32(syscall.Getuid())
 	out.Gid = uint32(syscall.Getgid())
+
+	out.SetTimes(&r.mtime, &r.mtime, &r.ctime)
 	return 0
 }
 
@@ -142,12 +159,18 @@ func (r *RootNode) Mkdir(ctx context.Context, name string, mode uint32, out *fus
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	now := time.Now()
+
 	newDir := &RootNode{
 		files:   map[string]*FileData{},
 		subdirs: map[string]*RootNode{},
+		mtime:   now,
+		ctime:   now,
 	}
 
 	r.subdirs[name] = newDir
+	r.mtime = now
+	r.ctime = now
 
 	stable := fs.StableAttr{
 		Mode: fuse.S_IFDIR,
@@ -158,6 +181,7 @@ func (r *RootNode) Mkdir(ctx context.Context, name string, mode uint32, out *fus
 	out.Attr.Mode = fuse.S_IFDIR | 0755
 	out.Attr.Uid = uint32(syscall.Getuid())
 	out.Attr.Gid = uint32(syscall.Getgid())
+	out.Attr.SetTimes(&now, &now, &now)
 
 	return node, 0
 
@@ -174,6 +198,9 @@ func (r *RootNode) Unlink(ctx context.Context, name string) syscall.Errno {
 	}
 
 	delete(r.files, name)
+
+	r.mtime = time.Now()
+	r.ctime = time.Now()
 	return 0
 
 }
@@ -193,6 +220,66 @@ func (r *RootNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 	}
 
 	delete(r.subdirs, name)
+
+	r.mtime = time.Now()
+	r.ctime = time.Now()
+	return 0
+
+}
+
+func (r *RootNode) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
+
+	newDir := newParent.(*RootNode)
+
+	if r == newDir {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+	} else {
+		first, second := r, newDir
+
+		if uintptr(unsafe.Pointer(r)) > uintptr(unsafe.Pointer(newDir)) {
+			first, second = newDir, r
+		}
+
+		first.mu.Lock()
+		defer first.mu.Unlock()
+		second.mu.Lock()
+		defer second.mu.Unlock()
+	}
+
+	if flags&RENAME_NOREPLACE != 0 {
+		if _, exists := newDir.files[newName]; exists {
+			return syscall.EEXIST
+		}
+		if _, exists := newDir.subdirs[newName]; exists {
+			return syscall.EEXIST
+		}
+	}
+
+	now := time.Now()
+
+	if data, ok := r.files[name]; ok {
+		// it is a file
+		delete(r.files, name)
+		data.ctime = now
+		newDir.files[newName] = data
+	} else if subDir, ok := r.subdirs[name]; ok {
+		delete(r.subdirs, name)
+		subDir.ctime = now
+		newDir.subdirs[newName] = subDir
+	} else {
+		return syscall.ENOENT
+	}
+
+	r.mtime = now
+	r.ctime = now
+	newDir.mtime = now
+	newDir.ctime = now
+
+	ok := r.MvChild(name, &newDir.Inode, newName, true)
+	if !ok {
+		return syscall.EIO
+	}
 	return 0
 
 }

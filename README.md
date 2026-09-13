@@ -41,14 +41,15 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the actual design notes and the bug
 - Creating directories, including nested ones (`mkdir`)
 - Deleting files (`rm`)
 - Deleting empty directories (`rmdir`) — refuses non-empty ones like real `rmdir` does
+- Moving/renaming files and directories (`mv`), same-dir and cross-dir
+- Real timestamps (`mtime`/`ctime`) that update correctly across creates, writes, truncates, deletes, and renames
 - Correct file/folder ownership so `ls -l` shows the actual user, not root
 - Safe concurrent access to the in-memory file/folder maps
 
 ## What's next
 
-- `Rename` / `mv` support
 - Actually persist to disk, so restarting the program doesn't wipe everything
-- Real timestamps (right now they're all zero)
 - Symlinks
+- `touch` on an already-existing file (time-only attribute updates)
 
 See `PHASES.md` for how this is being built out phase by phase.

@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"sync"
+	"time"
 )
 
 // Define the root node
@@ -18,14 +19,21 @@ This is how go-fuse knows your RootNode is a valid filesystem node
 *
 */
 
+// timestamps in prog
 type FileData struct {
 	content string
+	mtime   time.Time
+	ctime   time.Time
 }
+
+// timestamps in prog
 type RootNode struct {
 	fs.Inode
 	files   map[string]*FileData
 	subdirs map[string]*RootNode
 	mu      sync.Mutex
+	mtime   time.Time
+	ctime   time.Time
 }
 
 type FileNode struct {
