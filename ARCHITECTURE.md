@@ -41,9 +41,10 @@ A subdirectory is literally just another `RootNode`. That's why nested folders "
 
 ```
 RootNode
-├── files   map[string]*FileData     // file name -> shared, mutable content
-├── subdirs map[string]*RootNode     // dir name  -> nested RootNode
-└── mu      sync.Mutex               // guards both maps above
+├── files    map[string]*FileData     // file name -> shared, mutable content
+├── subdirs  map[string]*RootNode     // dir name  -> nested RootNode
+├── symlinks map[string]*SymLink      // symlink name -> target + timestamps
+└── mu       sync.Mutex               // guards all three maps above
 ```
 
 `FileData` is a pointer on purpose — I hit a bug early on where every `Lookup` created a fresh copy of the content, so writes seemed to vanish. Sharing the pointer across lookups fixed that; now every `FileNode` for the same file is looking at the same underlying data.
@@ -69,10 +70,16 @@ For a while, creating a file (`touch`/`echo >`) kept failing with "permission de
 - `atime` isn't actively tracked on reads (kept equal to `mtime`/`ctime` at creation time only) — updating it on every `Read` isn't implemented, mirroring real filesystems' `noatime`/`relatime` mount options.
 - Known gaps: `Setattr` requests that only carry time fields (e.g. `touch` on an already-existing file) aren't handled yet — they hit `ENOTSUP`. Birthtime is also still zero.
 
+## Symlinks
+
+`SymLink` is its own small node type (`target`, `mtime`, `ctime`) tracked in `RootNode.symlinks`, separate from `files`/`subdirs`. `Symlink()` creates the entry, `Readlink()` returns the stored target, and `Lookup`/`Readdir` include symlinks alongside regular files/dirs. Like `FileData`, `SymLink` needed its own `Getattr` (mode `S_IFLNK`, real uid/gid, its own `mtime`/`ctime`) — without it, go-fuse defaulted to root/1970 on `ls -l`.
+
+## Disk persistence
+
+`persistent.go` mirrors the in-memory tree into a `SerializableDir`/`SerializableFile`/`SerializableSymlink` tree that's just plain data (no mutexes, no pointers back into `RootNode`), then JSON-encodes it to `gofs_data.json` via `Save()`. `Load()` reverses this (`fromSerializable`) to rebuild real `RootNode`/`FileData`/`SymLink` structs, recursing into subdirs. `main()` calls `Load()` at startup and falls back to a fresh empty `RootNode` if no data file exists yet; `Save()` is called after any mutation (`Write`, `Setattr`, `Create`, `Mkdir`, `Unlink`, `Rmdir`, `Rename`, `Symlink`) so the file stays in sync.
+
 ## What's not done yet
 
-- No disk persistence — everything disappears when the process stops.
-- No symlinks.
 - `touch` on an already-existing file (`Setattr` time-only requests) isn't supported yet.
 - Birthtime isn't implemented (macOS-specific field, currently zero).
 - File content is one big string per file in memory, so this wouldn't hold up for large files.

@@ -24,7 +24,24 @@ Goal: get a working in-memory filesystem where files and directories can be crea
 - [ ] Known limitation: `Setattr` time-only requests (e.g. `touch` on an already-existing file) aren't supported yet
 - [ ] Known limitation: birthtime not implemented (macOS-specific field, currently zero)
 
-## Phase 3 — Planned
+## Phase 3 — Persistence & Symlinks (done)
 
-- [ ] Persist state to disk, so data survives a process restart
-- [ ] Symlinks (`Symlink` / `Readlink`)
+- [x] Persist state to disk (`gofs_data.json`), so data survives a process restart
+- [x] Symlinks (`Symlink` / `Readlink`), including correct owner/timestamps via `Getattr`
+
+## Phase 4 — Planned
+
+- [ ] `touch` on an already-existing file (`Setattr` time-only requests, currently `ENOTSUP`)
+- [ ] Birthtime support (macOS-specific field, currently zero)
+- [ ] Store file content as bytes/chunks instead of one big string, so large files don't need a full copy on every write
+- [ ] File permissions properly enforced (`chmod`) — currently mode is hardcoded (`0644`/`0755`)
+- [ ] Disk usage / quota simulation (`df`, `du`)
+
+## More upcoming (ideas, not yet scheduled to a phase)
+
+- [ ] Hard links (same inode shared across multiple names, unlike symlinks which just point elsewhere)
+- [ ] Per-user directory permissions/ownership (currently everything is owned by whoever runs the process)
+- [ ] Concurrent access edge cases (e.g. a file being deleted while another handle is reading it)
+- [ ] Extended attributes (xattrs) — custom metadata attached to files
+- [ ] Better handling of odd edge cases (symlink loops like `a -> b -> a`, very long paths, etc.)
+- [ ] Automated Go tests (`_test.go` files) — everything so far has been verified manually via `ls`/`cat`/etc.

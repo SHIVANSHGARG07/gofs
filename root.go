@@ -42,6 +42,13 @@ func (r *RootNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		})
 	}
 
+	for name := range r.symlinks {
+		entries = append(entries, fuse.DirEntry{
+			Name: name,
+			Mode: fuse.S_IFLNK,
+		})
+	}
+
 	return fs.NewListDirStream(entries), 0
 
 }
@@ -79,6 +86,17 @@ func (r *RootNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) 
 		return node, 0
 	}
 
+	symlink, symlinkExists := r.symlinks[name]
+
+	if symlinkExists {
+		stable := fs.StableAttr{
+			Mode: fuse.S_IFLNK,
+		}
+
+		node := r.NewPersistentInode(ctx, symlink, stable)
+		return node, 0
+	}
+
 	return nil, syscall.ENOENT
 
 }
@@ -99,7 +117,6 @@ out:
 6) Register as a real node
 7) Fill the form for out
 8) return things
-9) # timestamaps in progress
 
 **/
 
@@ -131,6 +148,8 @@ func (r *RootNode) Create(ctx context.Context, name string, flag uint32, mode ui
 
 	out.Attr.SetTimes(&now, &now, &now)
 
+	Save(globalRoot)
+
 	return node, nil, 0, 0
 }
 
@@ -149,7 +168,7 @@ func (r *RootNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrO
 2) make a branch new Root node, new subfolder itself
 3) put name and assign that to new Root Node
 4) mark it as a regular dir
-5) register as a real inode
+5) register as a real yeah minode
 6) send outputs : form out
 
 *
@@ -162,10 +181,11 @@ func (r *RootNode) Mkdir(ctx context.Context, name string, mode uint32, out *fus
 	now := time.Now()
 
 	newDir := &RootNode{
-		files:   map[string]*FileData{},
-		subdirs: map[string]*RootNode{},
-		mtime:   now,
-		ctime:   now,
+		files:    map[string]*FileData{},
+		subdirs:  map[string]*RootNode{},
+		symlinks: map[string]*SymLink{},
+		mtime:    now,
+		ctime:    now,
 	}
 
 	r.subdirs[name] = newDir
@@ -182,6 +202,8 @@ func (r *RootNode) Mkdir(ctx context.Context, name string, mode uint32, out *fus
 	out.Attr.Uid = uint32(syscall.Getuid())
 	out.Attr.Gid = uint32(syscall.Getgid())
 	out.Attr.SetTimes(&now, &now, &now)
+
+	Save(globalRoot)
 
 	return node, 0
 
@@ -201,6 +223,9 @@ func (r *RootNode) Unlink(ctx context.Context, name string) syscall.Errno {
 
 	r.mtime = time.Now()
 	r.ctime = time.Now()
+
+	Save(globalRoot)
+
 	return 0
 
 }
@@ -223,6 +248,9 @@ func (r *RootNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 
 	r.mtime = time.Now()
 	r.ctime = time.Now()
+
+	Save(globalRoot)
+
 	return 0
 
 }
@@ -280,6 +308,50 @@ func (r *RootNode) Rename(ctx context.Context, name string, newParent fs.InodeEm
 	if !ok {
 		return syscall.EIO
 	}
+
+	Save(globalRoot)
+
 	return 0
 
+}
+
+func (r *RootNode) Symlink(ctx context.Context, target, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	now := time.Now()
+
+	newSymlink := &SymLink{target: target, mtime: now, ctime: now}
+
+	r.symlinks[name] = newSymlink
+	r.mtime = now
+	r.ctime = now
+
+	stable := fs.StableAttr{
+		Mode: fuse.S_IFLNK,
+	}
+
+	node := r.NewPersistentInode(ctx, newSymlink, stable)
+
+	out.Attr.Mode = fuse.S_IFLNK | 0777
+	out.Attr.Uid = uint32(syscall.Getuid())
+	out.Attr.Gid = uint32(syscall.Getgid())
+	out.Attr.SetTimes(&now, &now, &now)
+
+	Save(globalRoot)
+
+	return node, 0
+}
+
+func (s *SymLink) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
+	return []byte(s.target), 0
+}
+
+func (s *SymLink) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+	out.Attr.Mode = fuse.S_IFLNK | 0777
+	out.Attr.Uid = uint32(syscall.Getuid())
+	out.Attr.Gid = uint32(syscall.Getgid())
+	out.SetTimes(&s.mtime, &s.mtime, &s.ctime)
+	return 0
 }

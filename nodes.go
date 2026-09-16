@@ -29,14 +29,22 @@ type FileData struct {
 // timestamps in prog
 type RootNode struct {
 	fs.Inode
-	files   map[string]*FileData
-	subdirs map[string]*RootNode
-	mu      sync.Mutex
-	mtime   time.Time
-	ctime   time.Time
+	files    map[string]*FileData
+	subdirs  map[string]*RootNode
+	mu       sync.Mutex
+	mtime    time.Time
+	ctime    time.Time
+	symlinks map[string]*SymLink
 }
 
 type FileNode struct {
 	fs.Inode
 	data *FileData
+}
+
+type SymLink struct {
+	fs.Inode
+	target string
+	mtime  time.Time
+	ctime  time.Time
 }

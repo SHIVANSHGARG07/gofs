@@ -108,6 +108,8 @@ func (f *FileNode) Write(ctx context.Context, fh fs.FileHandle, data []byte, off
 	f.data.mtime = now
 	f.data.ctime = now
 
+	Save(globalRoot)
+
 	return uint32(len(data)), 0
 
 }
@@ -143,6 +145,8 @@ func (f *FileNode) Setattr(
 	now := time.Now()
 	f.data.mtime = now
 	f.data.ctime = now
+
+	Save(globalRoot)
 
 	// Return the updated size and other attributes
 	return f.Getattr(ctx, fh, out)

@@ -5,3 +5,5 @@ helpers/
 *.log
 *.test
 *.out
+gofs_data.json
+gofs_data.json

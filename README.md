@@ -45,11 +45,11 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the actual design notes and the bug
 - Real timestamps (`mtime`/`ctime`) that update correctly across creates, writes, truncates, deletes, and renames
 - Correct file/folder ownership so `ls -l` shows the actual user, not root
 - Safe concurrent access to the in-memory file/folder maps
+- Symlinks (`ln -s`, `readlink`), with correct ownership/timestamps on `ls -l`
+- Persistence to disk (`gofs_data.json`) — state survives a process restart
 
 ## What's next
 
-- Actually persist to disk, so restarting the program doesn't wipe everything
-- Symlinks
 - `touch` on an already-existing file (time-only attribute updates)
 
 See `PHASES.md` for how this is being built out phase by phase.

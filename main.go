@@ -17,6 +17,8 @@ import (
 	"log"
 )
 
+var globalRoot *RootNode
+
 // Main Function
 
 /*
@@ -28,15 +30,22 @@ import (
 *
 */
 func main() {
-	root := &RootNode{
 
-		files: map[string]*FileData{
-			"hello.txt": {
-				content: "Hello from GOFS!!!!",
-			},
-		},
-		subdirs: map[string]*RootNode{},
+	root, err := Load()
+
+	if err != nil {
+		log.Fatal(err)
 	}
+
+	if root == nil {
+		root = &RootNode{
+			files:    map[string]*FileData{},
+			subdirs:  map[string]*RootNode{},
+			symlinks: map[string]*SymLink{},
+		}
+	}
+
+	globalRoot = root
 
 	server, err := fs.Mount("/Volumes/go-fs", root, &fs.Options{
 		MountOptions: fuse.MountOptions{
