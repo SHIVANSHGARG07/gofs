@@ -32,8 +32,7 @@ func (f *FileNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.Attr
 
 	out.SetTimes(&f.data.mtime, &f.data.mtime, &f.data.ctime)
 
-	out.Crtime_ = uint64(f.data.btime.Unix())
-	out.Crtimensec_ = uint32(f.data.btime.Nanosecond())
+	setBtime(&out.Attr, f.data.btime)
 
 	log.Printf("   File size: %d bytes", out.Size)
 	return 0

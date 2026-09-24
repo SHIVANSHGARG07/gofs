@@ -147,8 +147,7 @@ func (r *RootNode) Create(ctx context.Context, name string, flag uint32, mode ui
 		out.Attr.Gid = uint32(syscall.Getgid())
 		out.Attr.Size = uint64(len(existingData.content))
 		out.Attr.SetTimes(&now, &now, &existingData.ctime)
-		out.Attr.Crtime_ = uint64(existingData.btime.Unix())
-		out.Attr.Crtimensec_ = uint32(existingData.btime.Nanosecond())
+		setBtime(&out.Attr, existingData.btime)
 
 		Save(globalRoot)
 		return existingNode, nil, 0, 0
@@ -189,8 +188,7 @@ func (r *RootNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrO
 
 	out.SetTimes(&r.mtime, &r.mtime, &r.ctime)
 
-	out.Crtime_ = uint64(r.btime.Unix())
-	out.Crtimensec_ = uint32(r.btime.Nanosecond())
+	setBtime(&out.Attr, r.btime)
 	return 0
 }
 
@@ -388,8 +386,7 @@ func (s *SymLink) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOu
 	out.Attr.Gid = uint32(syscall.Getgid())
 	out.SetTimes(&s.mtime, &s.mtime, &s.ctime)
 
-	out.Crtime_ = uint64(s.btime.Unix())
-	out.Crtimensec_ = uint32(s.btime.Nanosecond())
+	setBtime(&out.Attr, s.btime)
 	return 0
 }
 
