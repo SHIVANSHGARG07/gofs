@@ -20,18 +20,20 @@ func (f *FileNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint3
 // Getattr returns file attributes (size, permissions, etc.)
 // timestamps in progress
 func (f *FileNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	log.Println("📊 GETATTR called!")
 
 	// Set file size to the length of our content
 	out.Size = uint64(len(f.data.content))
 
 	// Set file mode (permissions)
-	out.Mode = fuse.S_IFREG | 0644 // Regular file, rw-r--r--
+	out.Mode = fuse.S_IFREG | f.data.mode
 
 	out.Uid = uint32(syscall.Getuid())
 	out.Gid = uint32(syscall.Getgid())
 
 	out.SetTimes(&f.data.mtime, &f.data.mtime, &f.data.ctime)
+
+	out.Crtime_ = uint64(f.data.btime.Unix())
+	out.Crtimensec_ = uint32(f.data.btime.Nanosecond())
 
 	log.Printf("   File size: %d bytes", out.Size)
 	return 0
@@ -126,28 +128,48 @@ func (f *FileNode) Setattr(
 	out *fuse.AttrOut,
 ) syscall.Errno {
 
-	size, ok := in.GetSize()
-	if !ok {
-		return syscall.ENOTSUP
-	}
-
-	current := []byte(f.data.content)
-
-	if size < uint64(len(current)) {
-		current = current[:size]
-	} else if size > uint64(len(current)) {
-		current = append(current,
-			make([]byte, int(size)-len(current))...)
-	}
-
-	f.data.content = string(current)
-
 	now := time.Now()
-	f.data.mtime = now
-	f.data.ctime = now
+	changed := false
 
-	Save(globalRoot)
+	if size, ok := in.GetSize(); ok {
+		current := []byte(f.data.content)
+		if size < uint64(len(current)) {
+			current = current[:size]
+		} else if size > uint64(len(current)) {
+			current = append(current, make([]byte, int(size)-len(current))...)
+		}
+		f.data.content = string(current)
+		changed = true
+	}
 
-	// Return the updated size and other attributes
+	if _, ok := in.GetMTime(); ok {
+		changed = true
+	}
+
+	if _, ok := in.GetATime(); ok {
+		changed = true
+	}
+
+	if new_mode, ok := in.GetMode(); ok {
+		changed = true
+		f.data.mode = new_mode
+	}
+
+	if changed {
+		f.data.mtime = now
+		f.data.ctime = now
+		Save(globalRoot)
+	}
+
 	return f.Getattr(ctx, fh, out)
+
+}
+
+// Fsync is called when the kernel/editor wants to flush data to "disk".
+// Since we already persist on every Write/Setattr via Save(globalRoot),
+// there's nothing extra to flush here — just acknowledge success so
+// callers like vim don't see "Operation not supported" / E667.
+func (f *FileNode) Fsync(ctx context.Context, fh fs.FileHandle, flags uint32) syscall.Errno {
+	log.Println("💾 FSYNC called!")
+	return 0
 }

@@ -47,9 +47,12 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the actual design notes and the bug
 - Safe concurrent access to the in-memory file/folder maps
 - Symlinks (`ln -s`, `readlink`), with correct ownership/timestamps on `ls -l`
 - Persistence to disk (`gofs_data.json`) — state survives a process restart
+- Real timestamps including birthtime (`mtime`/`ctime`/`btime`), correct across creates, writes, truncates, deletes, renames, and chmod
+- File permissions (`chmod`) — mode is stored per file/directory and persists across restarts
 
 ## What's next
 
-- `touch` on an already-existing file (time-only attribute updates)
+- Permission enforcement (currently `chmod` only updates what `ls -l` shows; read/write isn't actually blocked based on mode)
+- Hard links, extended attributes, and other ideas — see `PHASES.md`
 
 See `PHASES.md` for how this is being built out phase by phase.

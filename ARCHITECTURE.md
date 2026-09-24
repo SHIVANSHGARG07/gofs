@@ -68,7 +68,11 @@ For a while, creating a file (`touch`/`echo >`) kept failing with "permission de
 - `mtime` = "content changed" — bumped when a file's bytes change (`Write`, `Setattr` truncate/extend) or a directory's listing changes (`Create`, `Mkdir`, `Unlink`, `Rmdir`).
 - `ctime` = "something about this inode changed" — bumped whenever `mtime` is bumped, plus on pure metadata/location changes that don't touch content (e.g. the moved item in a `Rename`).
 - `atime` isn't actively tracked on reads (kept equal to `mtime`/`ctime` at creation time only) — updating it on every `Read` isn't implemented, mirroring real filesystems' `noatime`/`relatime` mount options.
-- Known gaps: `Setattr` requests that only carry time fields (e.g. `touch` on an already-existing file) aren't handled yet — they hit `ENOTSUP`. Birthtime is also still zero.
+- Birthtime (`btime`) is tracked separately — set once at creation (`Create`/`Mkdir`/`Symlink`), exposed via `Getattr`, persisted, and never touched by `Write`/`Setattr`/`Rename`/`chmod`.
+
+## How permissions (chmod) work
+
+Each `FileData`/`RootNode` stores its own `mode uint32` (default `0644` for files, `0755` for directories, set at creation). `chmod` arrives as a `Setattr` call — there's no separate FUSE method for it, `SetAttrIn` just carries a `Mode` field alongside `Size`/`Mtime`/`Atime`, checked via `in.GetMode()`. `Getattr` reports the stored mode instead of a hardcoded value, and `persistent.go` saves/loads it like any other field. This is storage/reporting only — nothing currently checks the mode before allowing a `Write`/`Read`.
 
 ## Symlinks
 
@@ -80,6 +84,5 @@ For a while, creating a file (`touch`/`echo >`) kept failing with "permission de
 
 ## What's not done yet
 
-- `touch` on an already-existing file (`Setattr` time-only requests) isn't supported yet.
-- Birthtime isn't implemented (macOS-specific field, currently zero).
+- Permissions (`chmod`) are stored and reported correctly, but not enforced — `Write`/`Read` don't check the mode or reject access based on it.
 - File content is one big string per file in memory, so this wouldn't hold up for large files.

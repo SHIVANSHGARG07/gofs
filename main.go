@@ -15,6 +15,7 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"log"
+	"time"
 )
 
 var globalRoot *RootNode
@@ -37,11 +38,17 @@ func main() {
 		log.Fatal(err)
 	}
 
+	now := time.Now()
+
 	if root == nil {
 		root = &RootNode{
 			files:    map[string]*FileData{},
 			subdirs:  map[string]*RootNode{},
 			symlinks: map[string]*SymLink{},
+			btime:    now,
+			mtime:    now,
+			ctime:    now,
+			mode:     0755,
 		}
 	}
 
@@ -50,7 +57,7 @@ func main() {
 	server, err := fs.Mount("/Volumes/go-fs", root, &fs.Options{
 		MountOptions: fuse.MountOptions{
 			Name:  "gofs",
-			Debug: true,
+			Debug: false,
 		},
 	})
 

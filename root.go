@@ -127,11 +127,40 @@ func (r *RootNode) Create(ctx context.Context, name string, flag uint32, mode ui
 
 	now := time.Now()
 
-	newData := &FileData{content: "", mtime: now, ctime: now}
+	existingData, exists := r.files[name]
+
+	if exists {
+		existingData.mtime = now
+		existingData.ctime = now
+
+		if flag&syscall.O_TRUNC != 0 {
+			existingData.content = ""
+		}
+
+		r.mtime = now
+		r.ctime = now
+
+		existingNode := r.EmbeddedInode().GetChild(name)
+
+		out.Attr.Mode = fuse.S_IFREG | existingData.mode
+		out.Attr.Uid = uint32(syscall.Getuid())
+		out.Attr.Gid = uint32(syscall.Getgid())
+		out.Attr.Size = uint64(len(existingData.content))
+		out.Attr.SetTimes(&now, &now, &existingData.ctime)
+		out.Attr.Crtime_ = uint64(existingData.btime.Unix())
+		out.Attr.Crtimensec_ = uint32(existingData.btime.Nanosecond())
+
+		Save(globalRoot)
+		return existingNode, nil, 0, 0
+
+	}
+
+	now2 := time.Now()
+	newData := &FileData{content: "", mtime: now2, ctime: now2, btime: now2, mode: 0644}
 
 	r.files[name] = newData
-	r.mtime = now
-	r.ctime = now
+	r.mtime = now2
+	r.ctime = now2
 
 	stable := fs.StableAttr{
 		Mode: fuse.S_IFREG,
@@ -142,11 +171,11 @@ func (r *RootNode) Create(ctx context.Context, name string, flag uint32, mode ui
 	node := r.NewPersistentInode(ctx, fileNode, stable)
 
 	// Sent back to kernel
-	out.Attr.Mode = fuse.S_IFREG | 0644
+	out.Attr.Mode = fuse.S_IFREG | newData.mode
 	out.Attr.Uid = uint32(syscall.Getuid())
 	out.Attr.Gid = uint32(syscall.Getgid())
 
-	out.Attr.SetTimes(&now, &now, &now)
+	out.Attr.SetTimes(&now2, &now2, &now2)
 
 	Save(globalRoot)
 
@@ -154,11 +183,14 @@ func (r *RootNode) Create(ctx context.Context, name string, flag uint32, mode ui
 }
 
 func (r *RootNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = fuse.S_IFDIR | 0755
+	out.Mode = fuse.S_IFDIR | r.mode
 	out.Uid = uint32(syscall.Getuid())
 	out.Gid = uint32(syscall.Getgid())
 
 	out.SetTimes(&r.mtime, &r.mtime, &r.ctime)
+
+	out.Crtime_ = uint64(r.btime.Unix())
+	out.Crtimensec_ = uint32(r.btime.Nanosecond())
 	return 0
 }
 
@@ -186,6 +218,8 @@ func (r *RootNode) Mkdir(ctx context.Context, name string, mode uint32, out *fus
 		symlinks: map[string]*SymLink{},
 		mtime:    now,
 		ctime:    now,
+		btime:    now,
+		mode:     0755,
 	}
 
 	r.subdirs[name] = newDir
@@ -322,7 +356,7 @@ func (r *RootNode) Symlink(ctx context.Context, target, name string, out *fuse.E
 
 	now := time.Now()
 
-	newSymlink := &SymLink{target: target, mtime: now, ctime: now}
+	newSymlink := &SymLink{target: target, mtime: now, ctime: now, btime: now}
 
 	r.symlinks[name] = newSymlink
 	r.mtime = now
@@ -353,5 +387,60 @@ func (s *SymLink) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOu
 	out.Attr.Uid = uint32(syscall.Getuid())
 	out.Attr.Gid = uint32(syscall.Getgid())
 	out.SetTimes(&s.mtime, &s.mtime, &s.ctime)
+
+	out.Crtime_ = uint64(s.btime.Unix())
+	out.Crtimensec_ = uint32(s.btime.Nanosecond())
 	return 0
+}
+
+func (r *RootNode) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
+	out.Bsize = 4096
+	out.Frsize = 4096
+	out.NameLen = 255
+
+	out.Blocks = 1000000
+
+	used := r.totalUsedBytes()
+	usedBlocks := uint64(used) / uint64(out.Bsize)
+
+	out.Bfree = out.Blocks - usedBlocks
+	out.Bavail = out.Bfree
+
+	out.Files = 1000000
+	out.Ffree = out.Files - r.totalInodeCount()
+
+	return 0
+}
+
+func (r *RootNode) totalUsedBytes() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	total := 0
+	for _, f := range r.files {
+		total += len(f.content)
+	}
+
+	for _, sym := range r.symlinks {
+		total += len(sym.target)
+	}
+
+	for _, sub := range r.subdirs {
+		total += sub.totalUsedBytes()
+	}
+
+	return total
+}
+
+func (r *RootNode) totalInodeCount() uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	count := uint64(len(r.files) + len(r.symlinks))
+
+	for _, sub := range r.subdirs {
+		count += sub.totalInodeCount()
+	}
+
+	return count
 }

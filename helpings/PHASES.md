@@ -21,8 +21,9 @@ Goal: get a working in-memory filesystem where files and directories can be crea
 
 - [x] `Rename` — move/rename files and directories (same-dir and cross-dir)
 - [x] Real timestamps (mtime/ctime) across `Create`, `Mkdir`, `Write`, `Setattr` (size), `Unlink`, `Rmdir`, `Rename`
-- [ ] Known limitation: `Setattr` time-only requests (e.g. `touch` on an already-existing file) aren't supported yet
-- [ ] Known limitation: birthtime not implemented (macOS-specific field, currently zero)
+- [x] `Setattr` time-only requests (e.g. `touch` on an already-existing file) — now handles `Size`, `Mtime`, `Atime` independently instead of rejecting when `Size` is absent
+- [x] `Fsync` implemented as a no-op (data already persisted on `Write`/`Setattr` via `Save(globalRoot)`) — fixes vim `E667: Fsync failed` on save
+- [x] Birthtime (crtime) support — see Phase 4
 
 ## Phase 3 — Persistence & Symlinks (done)
 
@@ -31,11 +32,11 @@ Goal: get a working in-memory filesystem where files and directories can be crea
 
 ## Phase 4 — Planned
 
-- [ ] `touch` on an already-existing file (`Setattr` time-only requests, currently `ENOTSUP`)
-- [ ] Birthtime support (macOS-specific field, currently zero)
-- [ ] Store file content as bytes/chunks instead of one big string, so large files don't need a full copy on every write
-- [ ] File permissions properly enforced (`chmod`) — currently mode is hardcoded (`0644`/`0755`)
-- [ ] Disk usage / quota simulation (`df`, `du`)
+- [x] `touch` on an already-existing file (`Setattr` time-only requests) — done
+- [x] Birthtime support (`btime`) — set on creation (`Create`/`Mkdir`/`Symlink`/fresh root), exposed via `Getattr` (`Crtime_`/`Crtimensec_`), persisted in `gofs_data.json`, and preserved (not touched) on `Write`/`Setattr`/`Rename`/existing-file `Create`. Known caveat: editors like `vim` (with `backupcopy=auto`) may swap in a new inode on save via temp-file+rename, which naturally resets birthtime — this is expected editor/OS behavior, verified even on real filesystems (APFS, Lustre), not a gofs bug.
+- [ ] Store file content as bytes/chunks instead of one big string, so large files don't need a full copy on every write — deferred until DB-backed storage is introduced (design will change anyway)
+- [x] File permissions (`chmod`) — `mode` stored per file/dir (`FileData`/`RootNode`), set on creation (`0644`/`0755` defaults), updated via `Setattr`'s `GetMode()`, exposed via `Getattr` (both `FileNode` and `RootNode`, plus both branches of `Create`), and persisted in `gofs_data.json`. Note: this is storage/advertisement only (`ls -l` reflects the real mode) — actual enforcement (rejecting `Write`/`Read` based on mode/uid) is not implemented.
+- [x] Disk usage / quota simulation (`df`, `du`) — via `Statfs`
 
 ## More upcoming (ideas, not yet scheduled to a phase)
 

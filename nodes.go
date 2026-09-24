@@ -24,6 +24,8 @@ type FileData struct {
 	content string
 	mtime   time.Time
 	ctime   time.Time
+	btime   time.Time
+	mode    uint32
 }
 
 // timestamps in prog
@@ -34,7 +36,9 @@ type RootNode struct {
 	mu       sync.Mutex
 	mtime    time.Time
 	ctime    time.Time
+	btime    time.Time
 	symlinks map[string]*SymLink
+	mode     uint32
 }
 
 type FileNode struct {
@@ -47,4 +51,5 @@ type SymLink struct {
 	target string
 	mtime  time.Time
 	ctime  time.Time
+	btime  time.Time
 }

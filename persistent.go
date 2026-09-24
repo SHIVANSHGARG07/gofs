@@ -10,6 +10,8 @@ type SerializableFile struct {
 	Content string
 	Mtime   time.Time
 	Ctime   time.Time
+	Btime   time.Time
+	Mode    uint32
 }
 
 type SerializableDir struct {
@@ -18,12 +20,15 @@ type SerializableDir struct {
 	Symlinks map[string]SerializableSymlink
 	Mtime    time.Time
 	Ctime    time.Time
+	Btime    time.Time
+	Mode     uint32
 }
 
 type SerializableSymlink struct {
 	Target string
 	Mtime  time.Time
 	Ctime  time.Time
+	Btime  time.Time
 }
 
 const dataFile = "gofs_data.json"
@@ -43,6 +48,8 @@ func toSerializable(r *RootNode) SerializableDir {
 		Symlinks: map[string]SerializableSymlink{},
 		Mtime:    r.mtime,
 		Ctime:    r.ctime,
+		Btime:    r.btime,
+		Mode:     r.mode,
 	}
 
 	for name, data := range r.files {
@@ -50,6 +57,8 @@ func toSerializable(r *RootNode) SerializableDir {
 			Content: data.content,
 			Mtime:   data.mtime,
 			Ctime:   data.ctime,
+			Btime:   data.btime,
+			Mode:    data.mode,
 		}
 	}
 
@@ -58,6 +67,7 @@ func toSerializable(r *RootNode) SerializableDir {
 			Target: sym.target,
 			Mtime:  sym.mtime,
 			Ctime:  sym.ctime,
+			Btime:  sym.btime,
 		}
 	}
 
@@ -84,6 +94,8 @@ func fromSerializable(s SerializableDir) *RootNode {
 		symlinks: map[string]*SymLink{},
 		mtime:    s.Mtime,
 		ctime:    s.Ctime,
+		btime:    s.Btime,
+		mode:     s.Mode,
 	}
 
 	for name, sf := range s.Files {
@@ -91,6 +103,8 @@ func fromSerializable(s SerializableDir) *RootNode {
 			content: sf.Content,
 			mtime:   sf.Mtime,
 			ctime:   sf.Ctime,
+			btime:   sf.Btime,
+			mode:    sf.Mode,
 		}
 	}
 
@@ -103,6 +117,7 @@ func fromSerializable(s SerializableDir) *RootNode {
 			target: ss.Target,
 			mtime:  ss.Mtime,
 			ctime:  ss.Ctime,
+			btime:  ss.Btime,
 		}
 	}
 
