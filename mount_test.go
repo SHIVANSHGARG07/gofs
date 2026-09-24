@@ -146,3 +146,129 @@ func TestMountAndRename(t *testing.T) {
 		t.Errorf("expected content %q, got %q", "content", string(data))
 	}
 }
+
+func TestMountAndRmdir(t *testing.T) {
+	mntDir := mountTestFS(t)
+
+	dirPath := mntDir + "/emptydir"
+
+	if err := os.Mkdir(dirPath, 0755); err != nil {
+		t.Fatalf("Mkdir failed: %v", err)
+	}
+
+	if err := os.Remove(dirPath); err != nil {
+		t.Fatalf("Rmdir (via Remove) failed: %v", err)
+	}
+
+	if _, err := os.Stat(dirPath); !os.IsNotExist(err) {
+		t.Errorf("expected dir to be gone, got err=%v", err)
+	}
+}
+
+func TestMountAndRmdirNonEmpty(t *testing.T) {
+	mntDir := mountTestFS(t)
+
+	dirPath := mntDir + "/nonempty"
+
+	if err := os.Mkdir(dirPath, 0755); err != nil {
+		t.Fatalf("Mkdir failed: %v", err)
+	}
+
+	if err := os.WriteFile(dirPath+"/inside.txt", []byte("x"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	if err := os.Remove(dirPath); err == nil {
+		t.Errorf("expected Remove on non-empty dir to fail, but it succeeded")
+	}
+}
+
+func TestMountAndUnlinkNonExistent(t *testing.T) {
+	mntDir := mountTestFS(t)
+
+	filePath := mntDir + "/ghost.txt"
+
+	if err := os.Remove(filePath); !os.IsNotExist(err) {
+		t.Errorf("expected ENOENT-like error removing non-existent file, got %v", err)
+	}
+}
+
+func TestMountAndTruncate(t *testing.T) {
+	mntDir := mountTestFS(t)
+
+	filePath := mntDir + "/trunc.txt"
+
+	if err := os.WriteFile(filePath, []byte("hello world"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	if err := os.Truncate(filePath, 5); err != nil {
+		t.Fatalf("Truncate failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+
+	if string(data) != "hello" {
+		t.Errorf("expected content %q, got %q", "hello", string(data))
+	}
+}
+
+func TestMountAndSymlink(t *testing.T) {
+	mntDir := mountTestFS(t)
+
+	targetPath := mntDir + "/target.txt"
+	linkPath := mntDir + "/link.txt"
+
+	if err := os.WriteFile(targetPath, []byte("real data"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Fatalf("Symlink failed: %v", err)
+	}
+
+	resolved, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("Readlink failed: %v", err)
+	}
+
+	if resolved != targetPath {
+		t.Errorf("expected readlink %q, got %q", targetPath, resolved)
+	}
+
+	data, err := os.ReadFile(linkPath)
+	if err != nil {
+		t.Fatalf("ReadFile via symlink failed: %v", err)
+	}
+
+	if string(data) != "real data" {
+		t.Errorf("expected content %q, got %q", "real data", string(data))
+	}
+}
+
+func TestMountAndNestedDir(t *testing.T) {
+	mntDir := mountTestFS(t)
+
+	subDir := mntDir + "/nested"
+	filePath := subDir + "/inner.txt"
+
+	if err := os.Mkdir(subDir, 0755); err != nil {
+		t.Fatalf("Mkdir failed: %v", err)
+	}
+
+	if err := os.WriteFile(filePath, []byte("nested content"), 0644); err != nil {
+		t.Fatalf("WriteFile in subdir failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("ReadFile in subdir failed: %v", err)
+	}
+
+	if string(data) != "nested content" {
+		t.Errorf("expected content %q, got %q", "nested content", string(data))
+	}
+}
