@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,7 +26,9 @@ type FileData struct {
 	mtime   time.Time
 	ctime   time.Time
 	btime   time.Time
+	nlink   uint32
 	mode    uint32
+	ino     uint64
 }
 
 // timestamps in prog
@@ -39,6 +42,7 @@ type RootNode struct {
 	btime    time.Time
 	symlinks map[string]*SymLink
 	mode     uint32
+	ino      uint64
 }
 
 type FileNode struct {
@@ -52,4 +56,11 @@ type SymLink struct {
 	mtime  time.Time
 	ctime  time.Time
 	btime  time.Time
+	ino    uint64
+}
+
+var nextIno uint64 = 1
+
+func newIno() uint64 {
+	return atomic.AddUint64(&nextIno, 1)
 }
