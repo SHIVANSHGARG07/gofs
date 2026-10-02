@@ -11,8 +11,24 @@ import (
 )
 
 // Open is called when opening the file for reading
+// O_ACCMODE is a mask (bits 0011) used to extract just the access-mode
+// bits from the mixed flags value, telling us if this request is for
+// read, write, or both.
 func (f *FileNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
-	log.Println("📂 OPEN called!")
+
+	accessMode := flags & syscall.O_ACCMODE
+
+	wantsRead := accessMode == syscall.O_RDONLY || accessMode == syscall.O_RDWR
+	wantsWrite := accessMode == syscall.O_WRONLY || accessMode == syscall.O_RDWR
+
+	if wantsRead && f.data.mode&0400 == 0 {
+		return nil, 0, syscall.EACCES
+	}
+
+	if wantsWrite && f.data.mode&0200 == 0 {
+		return nil, 0, syscall.EACCES
+	}
+
 	return nil, 0, 0
 }
 
@@ -29,6 +45,8 @@ func (f *FileNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.Attr
 
 	out.Uid = uint32(syscall.Getuid())
 	out.Gid = uint32(syscall.Getgid())
+
+	out.Nlink = f.data.nlink
 
 	out.SetTimes(&f.data.mtime, &f.data.mtime, &f.data.ctime)
 

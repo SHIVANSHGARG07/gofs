@@ -7,11 +7,14 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ['1.25', '1.26.5', '1.27']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26.5'
+          go-version: ${{ matrix.go-version }}
       - name: Check formatting (gofmt)
         run: |
           fmt_out="$(gofmt -l .)"

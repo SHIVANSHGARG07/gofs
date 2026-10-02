@@ -1,9 +1,9 @@
 package main
 
-import "time"
 import (
 	"encoding/json"
 	"os"
+	"time"
 )
 
 type SerializableFile struct {
@@ -12,6 +12,8 @@ type SerializableFile struct {
 	Ctime   time.Time
 	Btime   time.Time
 	Mode    uint32
+	Nlink   uint32
+	Ino     uint64
 }
 
 type SerializableDir struct {
@@ -22,6 +24,7 @@ type SerializableDir struct {
 	Ctime    time.Time
 	Btime    time.Time
 	Mode     uint32
+	Ino      uint64
 }
 
 type SerializableSymlink struct {
@@ -29,6 +32,7 @@ type SerializableSymlink struct {
 	Mtime  time.Time
 	Ctime  time.Time
 	Btime  time.Time
+	Ino    uint64
 }
 
 const dataFile = "gofs_data.json"
@@ -50,6 +54,7 @@ func toSerializable(r *RootNode) SerializableDir {
 		Ctime:    r.ctime,
 		Btime:    r.btime,
 		Mode:     r.mode,
+		Ino:      r.ino,
 	}
 
 	for name, data := range r.files {
@@ -59,6 +64,8 @@ func toSerializable(r *RootNode) SerializableDir {
 			Ctime:   data.ctime,
 			Btime:   data.btime,
 			Mode:    data.mode,
+			Nlink:   data.nlink,
+			Ino:     data.ino,
 		}
 	}
 
@@ -68,6 +75,7 @@ func toSerializable(r *RootNode) SerializableDir {
 			Mtime:  sym.mtime,
 			Ctime:  sym.ctime,
 			Btime:  sym.btime,
+			Ino:    sym.ino,
 		}
 	}
 
@@ -96,6 +104,7 @@ func fromSerializable(s SerializableDir) *RootNode {
 		ctime:    s.Ctime,
 		btime:    s.Btime,
 		mode:     s.Mode,
+		ino:      s.Ino,
 	}
 
 	for name, sf := range s.Files {
@@ -105,6 +114,8 @@ func fromSerializable(s SerializableDir) *RootNode {
 			ctime:   sf.Ctime,
 			btime:   sf.Btime,
 			mode:    sf.Mode,
+			nlink:   sf.Nlink,
+			ino:     sf.Ino,
 		}
 	}
 
@@ -118,6 +129,7 @@ func fromSerializable(s SerializableDir) *RootNode {
 			mtime:  ss.Mtime,
 			ctime:  ss.Ctime,
 			btime:  ss.Btime,
+			ino:    ss.Ino,
 		}
 	}
 
@@ -153,5 +165,31 @@ func Load() (*RootNode, error) {
 		return nil, err
 	}
 
-	return fromSerializable(dir), nil
+	root := fromSerializable(dir)
+
+	// resume the ino counter so restarts don't reuse old numbers
+	var maxIno uint64 = 1
+	var scan func(r *RootNode)
+	scan = func(r *RootNode) {
+		if r.ino > maxIno {
+			maxIno = r.ino
+		}
+		for _, data := range r.files {
+			if data.ino > maxIno {
+				maxIno = data.ino
+			}
+		}
+		for _, sym := range r.symlinks {
+			if sym.ino > maxIno {
+				maxIno = sym.ino
+			}
+		}
+		for _, sub := range r.subdirs {
+			scan(sub)
+		}
+	}
+	scan(root)
+	nextIno = maxIno
+
+	return root, nil
 }

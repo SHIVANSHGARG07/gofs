@@ -65,6 +65,7 @@ func (r *RootNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) 
 		//create a node for file
 		stable := fs.StableAttr{
 			Mode: fuse.S_IFREG,
+			Ino:  data.ino,
 		}
 
 		// create a filenode with content
@@ -72,6 +73,19 @@ func (r *RootNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) 
 
 		// alternate to newInode
 		node := r.NewPersistentInode(ctx, fileNode, stable)
+
+		// Populate out.Attr so the kernel's cached attributes (notably
+		// Nlink) are correct. On Linux, vfs_link() rejects a link()
+		// syscall with ENOENT if the cached inode has Nlink == 0, which
+		// is exactly what an empty/zero-value out.Attr would produce.
+		out.Attr.Mode = fuse.S_IFREG | data.mode
+		out.Attr.Uid = uint32(syscall.Getuid())
+		out.Attr.Gid = uint32(syscall.Getgid())
+		out.Attr.Size = uint64(len(data.content))
+		out.Attr.Nlink = data.nlink
+		out.Attr.SetTimes(&data.mtime, &data.mtime, &data.ctime)
+		setBtime(&out.Attr, data.btime)
+
 		return node, 0
 	}
 
@@ -80,9 +94,18 @@ func (r *RootNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) 
 	if subExists {
 		stable := fs.StableAttr{
 			Mode: fuse.S_IFDIR,
+			Ino:  subDir.ino,
 		}
 
 		node := r.NewPersistentInode(ctx, subDir, stable)
+
+		out.Attr.Mode = fuse.S_IFDIR | subDir.mode
+		out.Attr.Nlink = 2 + uint32(len(subDir.subdirs))
+		out.Attr.Uid = uint32(syscall.Getuid())
+		out.Attr.Gid = uint32(syscall.Getgid())
+		out.Attr.SetTimes(&subDir.mtime, &subDir.mtime, &subDir.ctime)
+		setBtime(&out.Attr, subDir.btime)
+
 		return node, 0
 	}
 
@@ -91,9 +114,18 @@ func (r *RootNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) 
 	if symlinkExists {
 		stable := fs.StableAttr{
 			Mode: fuse.S_IFLNK,
+			Ino:  symlink.ino,
 		}
 
 		node := r.NewPersistentInode(ctx, symlink, stable)
+
+		out.Attr.Mode = fuse.S_IFLNK | 0777
+		out.Attr.Nlink = 1
+		out.Attr.Uid = uint32(syscall.Getuid())
+		out.Attr.Gid = uint32(syscall.Getgid())
+		out.Attr.SetTimes(&symlink.mtime, &symlink.mtime, &symlink.ctime)
+		setBtime(&out.Attr, symlink.btime)
+
 		return node, 0
 	}
 
@@ -155,7 +187,7 @@ func (r *RootNode) Create(ctx context.Context, name string, flag uint32, mode ui
 	}
 
 	now2 := time.Now()
-	newData := &FileData{content: "", mtime: now2, ctime: now2, btime: now2, mode: 0644}
+	newData := &FileData{content: "", mtime: now2, ctime: now2, btime: now2, mode: 0644, nlink: 1, ino: newIno()}
 
 	r.files[name] = newData
 	r.mtime = now2
@@ -163,6 +195,7 @@ func (r *RootNode) Create(ctx context.Context, name string, flag uint32, mode ui
 
 	stable := fs.StableAttr{
 		Mode: fuse.S_IFREG,
+		Ino:  newData.ino,
 	}
 
 	fileNode := &FileNode{data: newData}
@@ -183,6 +216,9 @@ func (r *RootNode) Create(ctx context.Context, name string, flag uint32, mode ui
 
 func (r *RootNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
 	out.Mode = fuse.S_IFDIR | r.mode
+
+	out.Nlink = 2 + uint32(len(r.subdirs))
+
 	out.Uid = uint32(syscall.Getuid())
 	out.Gid = uint32(syscall.Getgid())
 
@@ -218,6 +254,7 @@ func (r *RootNode) Mkdir(ctx context.Context, name string, mode uint32, out *fus
 		ctime:    now,
 		btime:    now,
 		mode:     0755,
+		ino:      newIno(),
 	}
 
 	r.subdirs[name] = newDir
@@ -226,6 +263,7 @@ func (r *RootNode) Mkdir(ctx context.Context, name string, mode uint32, out *fus
 
 	stable := fs.StableAttr{
 		Mode: fuse.S_IFDIR,
+		Ino:  newDir.ino,
 	}
 
 	node := r.NewPersistentInode(ctx, newDir, stable)
@@ -245,12 +283,13 @@ func (r *RootNode) Unlink(ctx context.Context, name string) syscall.Errno {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	_, exists := r.files[name]
+	data, exists := r.files[name]
 
 	if !exists {
 		return syscall.ENOENT
 	}
 
+	data.nlink--
 	delete(r.files, name)
 
 	r.mtime = time.Now()
@@ -354,7 +393,7 @@ func (r *RootNode) Symlink(ctx context.Context, target, name string, out *fuse.E
 
 	now := time.Now()
 
-	newSymlink := &SymLink{target: target, mtime: now, ctime: now, btime: now}
+	newSymlink := &SymLink{target: target, mtime: now, ctime: now, btime: now, ino: newIno()}
 
 	r.symlinks[name] = newSymlink
 	r.mtime = now
@@ -362,6 +401,7 @@ func (r *RootNode) Symlink(ctx context.Context, target, name string, out *fuse.E
 
 	stable := fs.StableAttr{
 		Mode: fuse.S_IFLNK,
+		Ino:  newSymlink.ino,
 	}
 
 	node := r.NewPersistentInode(ctx, newSymlink, stable)
@@ -440,4 +480,47 @@ func (r *RootNode) totalInodeCount() uint64 {
 	}
 
 	return count
+}
+
+func (r *RootNode) Link(ctx context.Context, target fs.InodeEmbedder, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	srcNode, ok := target.(*FileNode)
+	if !ok {
+		return nil, syscall.EPERM
+	}
+
+	// take lock
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.files[name]; exists {
+		return nil, syscall.EEXIST
+	}
+
+	// inc counter of nlink
+	srcNode.data.nlink++
+	r.files[name] = srcNode.data
+
+	now := time.Now()
+
+	// metadata change time
+	srcNode.data.ctime = now
+
+	// dir change and modify time
+	r.mtime = now
+	r.ctime = now
+
+	targetInode := target.EmbeddedInode()
+
+	out.Attr.Mode = fuse.S_IFREG | srcNode.data.mode
+	out.Attr.Uid = uint32(syscall.Getuid())
+	out.Attr.Gid = uint32(syscall.Getgid())
+	out.Attr.Size = uint64(len(srcNode.data.content))
+	out.Attr.Nlink = srcNode.data.nlink
+	out.Attr.SetTimes(&srcNode.data.mtime, &srcNode.data.mtime, &srcNode.data.ctime)
+
+	// birth time
+	setBtime(&out.Attr, srcNode.data.btime)
+
+	Save(globalRoot)
+	return targetInode, 0
 }

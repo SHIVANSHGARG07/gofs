@@ -72,7 +72,21 @@ For a while, creating a file (`touch`/`echo >`) kept failing with "permission de
 
 ## How permissions (chmod) work
 
-Each `FileData`/`RootNode` stores its own `mode uint32` (default `0644` for files, `0755` for directories, set at creation). `chmod` arrives as a `Setattr` call — there's no separate FUSE method for it, `SetAttrIn` just carries a `Mode` field alongside `Size`/`Mtime`/`Atime`, checked via `in.GetMode()`. `Getattr` reports the stored mode instead of a hardcoded value, and `persistent.go` saves/loads it like any other field. This is storage/reporting only — nothing currently checks the mode before allowing a `Write`/`Read`.
+Each `FileData`/`RootNode` stores its own `mode uint32` (default `0644` for files, `0755` for directories, set at creation). `chmod` arrives as a `Setattr` call — there's no separate FUSE method for it, `SetAttrIn` just carries a `Mode` field alongside `Size`/`Mtime`/`Atime`, checked via `in.GetMode()`. `Getattr` reports the stored mode instead of a hardcoded value, and `persistent.go` saves/loads it like any other field.
+
+Enforcement is done in `FileNode.Open`: the incoming `flags` is masked with `syscall.O_ACCMODE` to pull out just the access-mode bits (read/write/both, ignoring unrelated flags like `O_APPEND`/`O_CREAT`), then checked against the stored mode's owner-read (`0400`) / owner-write (`0200`) bits. If the requested access isn't allowed, `Open` returns `syscall.EACCES` and the kernel surfaces it as "Permission denied" — this is what actually blocks `cat`/`echo >`/`vim` on a `chmod 000` file, not `Getattr`/`Setattr` themselves. Since single-user (no per-file uid/gid), every access is treated as the owner, so only the owner bits are checked.
+
+### Known display quirk: `ls -l` can show a stale mode after `chmod`
+
+After `chmod 000 file`, `cat`/`echo >`/`vim` correctly get "Permission denied" (confirming enforcement works and `Setattr` did store the new mode), but `ls -l` can still print the *old* mode for a while, even with `EntryTimeout`/`AttrTimeout` set to `0` in `fs.Mount`'s options.
+
+Root cause: there are two independent caching layers between the kernel and this program on macOS:
+
+```
+ls -l  →  macOS VFS attribute cache  →  macFUSE kernel extension's own cache  →  go-fuse (EntryTimeout/AttrTimeout)  →  our Getattr
+```
+
+`EntryTimeout`/`AttrTimeout` only control the last hop (go-fuse ↔ macFUSE) — they don't touch macFUSE's or the kernel's own vnode attribute cache, which is outside this program's control. `stat()`-only calls (`ls -l`) are considered "safe" to serve from that cache, so they can return stale data. `open()` calls (`cat`, `echo >`, `vim`) are security-sensitive, so the kernel always re-validates permissions freshly through `Open` — which is why enforcement is correct even when the `ls -l` display isn't. This is a cosmetic macFUSE/kernel caching limitation, not a bug in `Setattr`/`Getattr`/`Open`.
 
 ## Symlinks
 
@@ -84,5 +98,5 @@ Each `FileData`/`RootNode` stores its own `mode uint32` (default `0644` for file
 
 ## What's not done yet
 
-- Permissions (`chmod`) are stored and reported correctly, but not enforced — `Write`/`Read` don't check the mode or reject access based on it.
 - File content is one big string per file in memory, so this wouldn't hold up for large files.
+- Single-user only — no per-file uid/gid, so permission checks only ever compare against the "owner" bits (see the Permissions section above).

@@ -2,7 +2,7 @@
 
 Tracking this project in phases instead of one big feature list, so it's easier to see what was actually done at each point.
 
-## Phase 1 — Basic CRUD (current)
+## Phase 1 — Basic CRUD (done)
 
 Goal: get a working in-memory filesystem where files and directories can be created, read, written, listed, and deleted.
 
@@ -30,19 +30,27 @@ Goal: get a working in-memory filesystem where files and directories can be crea
 - [x] Persist state to disk (`gofs_data.json`), so data survives a process restart
 - [x] Symlinks (`Symlink` / `Readlink`), including correct owner/timestamps via `Getattr`
 
-## Phase 4 — Planned
+## Phase 4 — Timestamps, Permissions & Quotas (done)
 
 - [x] `touch` on an already-existing file (`Setattr` time-only requests) — done
 - [x] Birthtime support (`btime`) — set on creation (`Create`/`Mkdir`/`Symlink`/fresh root), exposed via `Getattr` (`Crtime_`/`Crtimensec_`), persisted in `gofs_data.json`, and preserved (not touched) on `Write`/`Setattr`/`Rename`/existing-file `Create`. Known caveat: editors like `vim` (with `backupcopy=auto`) may swap in a new inode on save via temp-file+rename, which naturally resets birthtime — this is expected editor/OS behavior, verified even on real filesystems (APFS, Lustre), not a gofs bug.
-- [ ] Store file content as bytes/chunks instead of one big string, so large files don't need a full copy on every write — deferred until DB-backed storage is introduced (design will change anyway)
-- [x] File permissions (`chmod`) — `mode` stored per file/dir (`FileData`/`RootNode`), set on creation (`0644`/`0755` defaults), updated via `Setattr`'s `GetMode()`, exposed via `Getattr` (both `FileNode` and `RootNode`, plus both branches of `Create`), and persisted in `gofs_data.json`. Note: this is storage/advertisement only (`ls -l` reflects the real mode) — actual enforcement (rejecting `Write`/`Read` based on mode/uid) is not implemented.
+- [x] File permissions (`chmod`) — `mode` stored per file/dir (`FileData`/`RootNode`), set on creation (`0644`/`0755` defaults), updated via `Setattr`'s `GetMode()`, exposed via `Getattr` (both `FileNode` and `RootNode`, plus both branches of `Create`), and persisted in `gofs_data.json`.
 - [x] Disk usage / quota simulation (`df`, `du`) — via `Statfs`
+- [x] Automated Go tests (`_test.go` files) — `mount_test.go` covers mount-based integration tests (CRUD, rename, timestamps, symlinks, permissions); CI (`.github/workflows/ci.yml`) runs `gofmt`, `go vet`, `go build`, `go test`
 
-## More upcoming (ideas, not yet scheduled to a phase)
+## Phase 5 — Links & Stable Inodes (done)
 
-- [ ] Hard links (same inode shared across multiple names, unlike symlinks which just point elsewhere)
-- [ ] Per-user directory permissions/ownership (currently everything is owned by whoever runs the process)
+- [x] Permission enforcement — `FileNode.Open` rejects read/write based on the stored mode's owner bits, returning `syscall.EACCES` when disallowed. See `ARCHITECTURE.md` for details and the `ls -l` caching caveat.
+- [x] Hard links (same inode shared across multiple names, unlike symlinks which just point elsewhere). Known caveat: after a process restart, hard-linked names are reloaded as separate `FileData` objects (same `Ino`/`Nlink` values, but no longer sharing the same pointer), so `chmod`/content changes stop staying in sync — tracked as a GitHub issue.
+- [x] Directory/symlink stable inode numbers — `RootNode`/`SymLink` now carry their own `ino` (assigned via the same thread-safe `newIno()` counter used for files), set on `Mkdir`/`Symlink` and reused (not regenerated) on `Lookup`; persisted in `gofs_data.json` and resumed on restart via the tree scan in `Load()`. Verified: repeated `stat` across remounts/restarts no longer swaps inode numbers between directories.
+
+## Phase 6 — Upcoming
+
 - [ ] Concurrent access edge cases (e.g. a file being deleted while another handle is reading it)
 - [ ] Extended attributes (xattrs) — custom metadata attached to files
 - [ ] Better handling of odd edge cases (symlink loops like `a -> b -> a`, very long paths, etc.)
-- [ ] Automated Go tests (`_test.go` files) — everything so far has been verified manually via `ls`/`cat`/etc.
+
+## More upcoming (ideas, not yet scheduled to a phase)
+
+- [ ] Store file content as bytes/chunks instead of one big string, so large files don't need a full copy on every write — deferred until DB-backed storage is introduced (design will change anyway)
+- [ ] Per-user directory permissions/ownership (currently single-user only — everything is owned by whoever runs the process; permission bits are stored/enforced per file/dir, but there's no concept of multiple distinct users/uids yet)
